@@ -32,16 +32,27 @@ export default function Landing() {
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card glass-panel animate-fade-in">
+    <div className="auth-container" style={{ position: 'relative', overflow: 'hidden' }}>
+      {/* Animated Background Effects */}
+      <div className="bg-orb orb-1"></div>
+      <div className="bg-orb orb-2"></div>
+      <div className="bg-orb orb-3"></div>
+
+      <div className="auth-card glass-panel animate-fade-in" style={{ position: 'relative', zIndex: 10, backdropFilter: 'blur(20px)', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1)' }}>
         <div className="auth-header">
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-            <div style={{ background: 'rgba(79, 140, 255, 0.1)', padding: '16px', borderRadius: '50%' }}>
-              <Activity size={36} color="var(--primary)" />
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+            <div style={{ 
+              background: 'linear-gradient(135deg, rgba(79, 140, 255, 0.2) 0%, rgba(79, 140, 255, 0) 100%)', 
+              padding: '20px', 
+              borderRadius: '24px',
+              border: '1px solid rgba(79, 140, 255, 0.3)',
+              boxShadow: '0 0 30px rgba(79, 140, 255, 0.2)'
+            }}>
+              <Activity size={42} color="#60a5fa" />
             </div>
           </div>
-          <h1 className="auth-title">MediGemma-X</h1>
-          <p className="auth-subtitle">AI-Powered Clinical Interpretability</p>
+          <h1 className="auth-title" style={{ fontSize: '32px', letterSpacing: '-0.5px' }}>MediGemma-X</h1>
+          <p className="auth-subtitle" style={{ fontSize: '15px' }}>Next-Gen Clinical Interpretability Network</p>
         </div>
 
         <div className="auth-switch">
