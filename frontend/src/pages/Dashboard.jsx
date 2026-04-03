@@ -23,6 +23,7 @@ export default function Dashboard() {
   const [patientSex, setPatientSex] = useState('Male');
   const [scanType, setScanType] = useState('X-Ray');
   const [symptoms, setSymptoms] = useState('');
+  const [featureHighlight, setFeatureHighlight] = useState('');
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [resultText, setResultText] = useState('');
@@ -91,41 +92,57 @@ export default function Dashboard() {
   const analyzeScan = async () => {
     if (!client || !imageFile) return;
     setIsAnalyzing(true);
+    setResultText('');
+    setResultImage(null);
+    setFindings([]);
 
     try {
-      // The Gradio function analyze_medical_scan expects (image, text_prompt)
-      // and based on our recent updates, it might return just text, or text + image.
-      // We will assume the standard Stage 1 returns just Text for now, 
-      // but we will parse it if it has bounding boxes or we can fetch both if updated.
-
       const clinicalContext = `Patient Age: ${patientAge || 'Unknown'}, Sex: ${patientSex}, Scan Type: ${scanType}. Symptoms: ${symptoms || 'None reported'}.`;
-      const enhancedPrompt = `${clinicalContext} Clinical Inquiry: ${prompt || "What pathology is visible?"}`;
+      let enhancedPrompt = `${clinicalContext} Clinical Inquiry: ${prompt || "What pathology is visible?"}`;
+      if (featureHighlight) {
+        enhancedPrompt += ` Feature to Highlight: ${featureHighlight}`;
+      }
 
       const result = await client.predict("/predict", {
         image: imageFile,
         text_prompt: enhancedPrompt,
       });
 
-      // Assuming result.data[0] is the text response
-      let textResponse = result.data[0];
-      if (typeof textResponse === 'string') {
+      console.log("Prediction Result:", result.data);
+
+      let textResponse = '';
+      let imgResponse = null;
+
+      // Robustly parse the response for Text and Image
+      if (Array.isArray(result.data)) {
+        result.data.forEach(item => {
+          if (typeof item === 'string') {
+             if (item.startsWith('http') || item.startsWith('data:image')) {
+               imgResponse = item;
+             } else if (textResponse === '') {
+               textResponse = item;
+             }
+          } else if (item && typeof item === 'object') {
+             if (item.url) imgResponse = item.url;
+             else if (item.path) imgResponse = item.path;
+             else if (textResponse === '') textResponse = JSON.stringify(item);
+          }
+        });
+      } else if (typeof result.data === 'string') {
+        textResponse = result.data;
+      }
+
+      if (textResponse) {
         textResponse = textResponse.replace(/\*\*/g, '');
+        setResultText(textResponse);
+      } else {
+        setResultText("No text report was generated.");
       }
-      setResultText(textResponse);
-
-      // Mocking the visual grounding parsing if MedGemma returns coords
-      // In a real scenario with the updated backend, result.data[0] might be the image and result.data[1] the text.
-      if (Array.isArray(result.data) && result.data.length > 1) {
-        // If we implemented the 2-output model returning Image + Text
-        if (typeof result.data[0] === 'string' && result.data[0].startsWith('http')) {
-          setResultImage(result.data[0]); // Gradio often returns URLs for parsed images
-          let secondaryText = result.data[1];
-          if (typeof secondaryText === 'string') secondaryText = secondaryText.replace(/\*\*/g, '');
-          setResultText(secondaryText);
-        }
+      
+      if (imgResponse) {
+        setResultImage(imgResponse);
       }
 
-      // Simple mock parser: If text contains "pneumonia", highlight it.
       const mockFindings = [];
       if (textResponse.toLowerCase().includes('pneumonia') || textResponse.toLowerCase().includes('effusion')) {
         mockFindings.push('Abnormal Opacity Found');
@@ -630,6 +647,16 @@ export default function Dashboard() {
                     <option value="CT Scan">CT Scan</option>
                     <option value="Ultrasound">Ultrasound</option>
                     <option value="PET Scan">PET Scan</option>
+                    <option value="Mammography">Mammography</option>
+                    <option value="Fluoroscopy">Fluoroscopy</option>
+                    <option value="Angiography">Angiography</option>
+                    <option value="Endoscopy / Colonoscopy">Endoscopy / Colonoscopy</option>
+                    <option value="Funduscopy (Retinal)">Funduscopy (Retinal)</option>
+                    <option value="Optical Coherence Tomography (OCT)">Optical Coherence Tomography (OCT)</option>
+                    <option value="Pathology (Histology)">Pathology (Histology)</option>
+                    <option value="Electrocardiogram (ECG/EKG Visual)">Electrocardiogram (ECG/EKG Visual)</option>
+                    <option value="Clinical Photograph">Clinical Photograph</option>
+                    <option value="Dermatology / Skin">Dermatology / Skin</option>
                   </select>
                 </div>
               </div>
@@ -639,19 +666,10 @@ export default function Dashboard() {
                 <textarea className="input-field" rows="2" style={{ height: 'auto', resize: 'vertical' }} placeholder="E.g., Persistent cough for 2 weeks, mild fever. History of smoking." value={symptoms} onChange={(e) => setSymptoms(e.target.value)}></textarea>
               </div>
 
-              <div className="input-group">
-                <label className="input-label">Specific Clinical Inquiry (Prompt)</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="E.g., Are there any signs of pleural effusion?"
-                />
-              </div>
+              {/* Patient Demographics fields... */}
 
               {!selectedImage ? (
-                <div className="uploader" onClick={() => fileInputRef.current?.click()}>
+                <div className="uploader" onClick={() => fileInputRef.current?.click()} style={{ marginTop: '24px' }}>
                   <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} />
                   <div className="upload-icon">
                     <UploadCloud size={24} />
@@ -662,76 +680,125 @@ export default function Dashboard() {
                   </div>
                 </div>
               ) : (
-                <div className="analysis-grid">
-
-                  {/* Left Side: Image View */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                      <h3 className="input-label" style={{ margin: 0 }}>Scan Preview</h3>
-                      <span style={{ fontSize: '13px', color: 'var(--primary)', cursor: 'pointer' }} onClick={() => setSelectedImage(null)}>
-                        Replace Image
-                      </span>
-                    </div>
-
-                    <div className="img-preview-container border" style={{ borderColor: 'var(--panel-border)', borderStyle: 'solid', borderWidth: '1px' }}>
-                      <img src={resultImage || selectedImage} alt="Medical Scan" className="img-preview" />
-                      {isAnalyzing && (
-                        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <div style={{ textAlign: 'center' }}>
-                            <Activity className="animate-spin" size={32} color="var(--primary)" style={{ margin: '0 auto 12px', animation: 'spin 2s linear infinite' }} />
-                            <p>MediGemma is analyzing...</p>
-                          </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginTop: '24px' }}>
+                  
+                  {/* Top Images Section */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '20px' }}>
+                    {/* Left: Original Image */}
+                    <div className="glass-panel" style={{ padding: '0', overflow: 'hidden', background: 'rgba(255,255,255,0.02)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--panel-border)', background: 'rgba(0,0,0,0.3)' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <UploadCloud size={14} /> Upload Medical Scan
                         </div>
-                      )}
+                        <span style={{ fontSize: '12px', color: 'var(--primary)', cursor: 'pointer' }} onClick={() => setSelectedImage(null)}>
+                          Replace
+                        </span>
+                      </div>
+                      <div style={{ padding: '16px', display: 'flex', height: '350px', alignItems: 'center', justifyContent: 'center' }}>
+                        <img src={selectedImage} alt="Medical Scan" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }} />
+                      </div>
                     </div>
 
-                    <button
-                      className="btn btn-primary"
-                      style={{ width: '100%', marginTop: '16px', padding: '12px' }}
-                      onClick={analyzeScan}
-                      disabled={isAnalyzing || !connected}
-                    >
-                      {isAnalyzing ? 'Processing AI Models...' : 'Run Multimodal Analysis'}
-                    </button>
-                  </div>
-
-                  {/* Right Side: Results */}
-                  <div className="glass-panel" style={{ background: 'rgba(0,0,0,0.2)' }}>
-                    <div className="report-title">
-                      <Activity size={18} color="var(--primary)" />
-                      MediGemma-X Structured Report
-                    </div>
-
-                    <div className="report-section">
-                      {resultText ? (
-                        <div className="animate-fade-in">
-                          {findings.length > 0 && (
-                            <div style={{ marginBottom: '20px' }}>
-                              {findings.map((f, i) => (
-                                <span key={i} className="finding-tag">{f}</span>
-                              ))}
+                    {/* Right: Result Image (Visual Grounding) */}
+                    <div className="glass-panel" style={{ padding: '0', overflow: 'hidden', background: 'rgba(255,255,255,0.02)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--panel-border)', background: 'rgba(0,0,0,0.3)' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Target size={14} /> Visual Grounding (OWL-ViT)
+                        </div>
+                      </div>
+                      <div style={{ padding: '16px', display: 'flex', height: '350px', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                        {resultImage ? (
+                          <img src={resultImage} alt="Grounded Medical Scan" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }} />
+                        ) : (
+                          <div style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center' }}>
+                            {isAnalyzing ? "Generating bounding boxes..." : "Run analysis to view visual grounding"}
+                          </div>
+                        )}
+                        {isAnalyzing && (
+                          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <Activity className="animate-spin" size={32} color="var(--primary)" style={{ margin: '0 auto 12px' }} />
+                              <p>MediGemma is analyzing...</p>
                             </div>
-                          )}
-
-                          <div style={{ fontSize: '15px', lineHeight: '1.6', color: '#E2E8F0', whiteSpace: 'pre-wrap' }}>
-                            {resultText}
                           </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-                          <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--panel-border)', display: 'flex', gap: '12px' }}>
-                            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={handleSendForReview}>Send for Review</button>
-                            <button className="btn btn-primary" style={{ flex: 1 }}>Download Results</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '40px' }}>
-                          <AlertCircle size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-                          <p>Awaiting analysis. Upload a scan and click run.</p>
-                          {!connected && <p style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '8px' }}>Disconnected from AI Backend.</p>}
-                        </div>
-                      )}
+                  {/* Bottom Outputs Section */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '20px' }}>
+                    {/* Left: Action Button / Prompts */}
+                    <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', background: 'rgba(0,0,0,0.2)' }}>
+                      <div className="input-group" style={{ marginBottom: 0 }}>
+                        <label className="input-label" style={{ fontSize: '13px', color: '#ccc' }}>Diagnostic Query</label>
+                        <input
+                          type="text"
+                          className="input-field"
+                          value={prompt}
+                          onChange={(e) => setPrompt(e.target.value)}
+                          placeholder="e.g. what is the possible injury or disease?"
+                          style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
+                        />
+                      </div>
+                      <div className="input-group" style={{ marginBottom: 0 }}>
+                        <label className="input-label" style={{ fontSize: '13px', color: '#ccc' }}>Feature to Highlight (Optional)</label>
+                        <input
+                          type="text"
+                          className="input-field"
+                          value={featureHighlight}
+                          onChange={(e) => setFeatureHighlight(e.target.value)}
+                          placeholder="e.g. infection"
+                          style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
+                        />
+                      </div>
+                      
+                      <div style={{ flexGrow: 1 }}></div>
+
+                      <button
+                        className="btn btn-primary"
+                        style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 'bold' }}
+                        onClick={analyzeScan}
+                        disabled={isAnalyzing || !connected}
+                      >
+                        {isAnalyzing ? 'Processing AI...' : 'Analyze & Ground'}
+                      </button>
                     </div>
 
+                    {/* Right: AI Report */}
+                    <div className="glass-panel" style={{ background: 'rgba(0,0,0,0.2)', padding: '24px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid var(--panel-border)', paddingBottom: '12px', marginBottom: '16px', color: '#ccc' }}>
+                        AI Diagnostic Report (MedGemma)
+                      </div>
+
+                      <div className="report-section" style={{ minHeight: '150px' }}>
+                        {resultText ? (
+                          <div className="animate-fade-in">
+                            {findings.length > 0 && (
+                              <div style={{ marginBottom: '16px' }}>
+                                {findings.map((f, i) => (
+                                  <span key={i} className="finding-tag" style={{ background: 'rgba(255, 68, 68, 0.2)', color: '#ff6b6b', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', border: '1px solid rgba(255,68,68,0.3)' }}>{f}</span>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ fontSize: '14px', lineHeight: '1.6', color: '#E2E8F0', whiteSpace: 'pre-wrap' }}>
+                              {resultText}
+                            </div>
+                            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--panel-border)', display: 'flex', gap: '12px' }}>
+                              <button className="btn btn-secondary" style={{ flex: 1, padding: '10px' }} onClick={handleSendForReview}>Send for Review</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ textAlign: 'center', color: 'var(--text-muted)', paddingTop: '40px' }}>
+                            <AlertCircle size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                            <p style={{ fontSize: '13px' }}>Awaiting analysis. Upload a scan and click run.</p>
+                            {!connected && <p style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '8px' }}>Disconnected from AI Backend.</p>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
+
                 </div>
               )}
             </div>
