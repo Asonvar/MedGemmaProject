@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UploadCloud, Activity, LayoutDashboard, Search, Settings, LogOut, CheckCircle2, AlertCircle, Menu, X, ChevronDown, FileClock, Users, Target, FileText, Trash2 } from 'lucide-react';
+import { UploadCloud, Activity, LayoutDashboard, Search, Settings, LogOut, CheckCircle2, AlertCircle, Menu, X, ChevronDown, FileClock, Users, Target, FileText, Trash2, Bell, Download, Send } from 'lucide-react';
 import { Client } from '@gradio/client';
 
 export default function Dashboard() {
@@ -33,6 +33,11 @@ export default function Dashboard() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [myRecords, setMyRecords] = useState([]);
+  const [selectedPatientRecord, setSelectedPatientRecord] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatting, setIsChatting] = useState(false);
 
   const fileInputRef = useRef(null);
 
@@ -47,12 +52,38 @@ export default function Dashboard() {
       setPendingReviews(reviews);
     }
 
-    // Load records for patient
-    if (role === 'patient') {
-      const records = JSON.parse(localStorage.getItem('myRecords') || '[]');
-      setMyRecords(records);
-    }
+    // Load records for both patient and doctor
+    const records = JSON.parse(localStorage.getItem('myRecords') || '[]');
+    setMyRecords(records);
+
+    // Load notifications
+    const notifs = JSON.parse(localStorage.getItem('notifications') || '[]');
+    setNotifications(notifs.filter(n => n.role === role || n.role === 'all'));
   }, [role]);
+
+  const handleNotificationClick = (notif) => {
+    setShowNotifications(false);
+    if (!notif.recordId) return;
+
+    if (role === 'doctor') {
+      const review = pendingReviews.find(r => r.id === notif.recordId);
+      if (review) {
+        setSelectedReview(review);
+      } else {
+        const record = myRecords.find(r => r.id === notif.recordId);
+        if (record) {
+          setActiveTab('records');
+          setSelectedPatientRecord(record);
+        }
+      }
+    } else {
+      const record = myRecords.find(r => r.id === notif.recordId);
+      if (record) {
+        setActiveTab('records');
+        setSelectedPatientRecord(record);
+      }
+    }
+  };
 
   const handleConnect = async () => {
     if (!colabUrl) return;
@@ -64,7 +95,7 @@ export default function Dashboard() {
       if (cleanUrl.endsWith('/')) {
         cleanUrl = cleanUrl.slice(0, -1);
       }
-      
+
       console.log("🔗 Connecting to Gradio:", cleanUrl);
       const c = await Client.connect(cleanUrl);
       setClient(c);
@@ -111,7 +142,7 @@ export default function Dashboard() {
     try {
       const base64Image = await fileToBase64(imageFile);
       console.log("📸 Image converted to Base64 to bypass Colab Upload Hang");
-      
+
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Request timed out after 3 minutes. The Colab backend might be stuck or out of memory.")), 180000)
       );
@@ -171,10 +202,10 @@ export default function Dashboard() {
         // If the backend returns a relative path (common in some Gradio versions), 
         // we must prepend the Colab/Gradio URL to make it a valid absolute URL.
         if (typeof imgResponse === 'string' && !imgResponse.startsWith('http') && !imgResponse.startsWith('data:')) {
-            const baseUrl = colabUrl.endsWith('/') ? colabUrl.slice(0, -1) : colabUrl;
-            // Gradio absolute path for files is usually /file=... or similar
-            const cleanPath = imgResponse.startsWith('/') ? imgResponse : `/${imgResponse}`;
-            imgResponse = `${baseUrl}${cleanPath}`;
+          const baseUrl = colabUrl.endsWith('/') ? colabUrl.slice(0, -1) : colabUrl;
+          // Gradio absolute path for files is usually /file=... or similar
+          const cleanPath = imgResponse.startsWith('/') ? imgResponse : `/${imgResponse}`;
+          imgResponse = `${baseUrl}${cleanPath}`;
         }
         setResultImage(imgResponse);
       }
@@ -187,15 +218,15 @@ export default function Dashboard() {
 
     } catch (error) {
       console.error("Analysis Failed", error);
-      
+
       // Attempt to extract as much information from the error as possible
       let errorDetails = error.message || 'Unknown Error';
       try {
-          if (error.stack) errorDetails += `\\n\\nStack: ${error.stack}`;
-          if (error.response) errorDetails += `\\n\\nResponse: ${JSON.stringify(error.response)}`;
-          
-          errorDetails += `\\n\\nRaw Error Object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`;
-      } catch(e) {}
+        if (error.stack) errorDetails += `\\n\\nStack: ${error.stack}`;
+        if (error.response) errorDetails += `\\n\\nResponse: ${JSON.stringify(error.response)}`;
+
+        errorDetails += `\\n\\nRaw Error Object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`;
+      } catch (e) { }
 
       setResultText(`🚨 DIANGNOSTIC ERROR:\\n\\n${errorDetails}\\n\\nIf this says "Failed to fetch" or "NetworkError", your browser (Safari) is blocking the connection to Colab because of Cross-Origin rules.`);
       setIsAnalyzing(false);
@@ -232,6 +263,7 @@ export default function Dashboard() {
         date: new Date().toLocaleDateString(),
         prompt: prompt || "What pathology is visible?",
         scanImage: compressedBase64,
+        groundedImage: resultImage,
         aiResult: resultText,
         findings
       };
@@ -246,6 +278,12 @@ export default function Dashboard() {
         setMyRecords(updatedRecords);
 
         alert("Sent for review to your clinical team!");
+
+        // Notify doctor
+        const notifs = JSON.parse(localStorage.getItem('notifications') || '[]');
+        notifs.push({ id: Date.now(), role: 'doctor', recordId: newReview.id, message: `New scan submitted for review by ${userName}`, date: new Date().toLocaleTimeString() });
+        localStorage.setItem('notifications', JSON.stringify(notifs));
+
         setActiveTab('records'); // Automatically navigate user to their records tab
       } catch (e) {
         console.error("Storage error:", e);
@@ -282,6 +320,12 @@ export default function Dashboard() {
     }
 
     alert(isApproved ? "Prediction approved! Model data updated." : "Correction submitted! Model data updated.");
+
+    // Notify patient
+    const notifs = JSON.parse(localStorage.getItem('notifications') || '[]');
+    notifs.push({ id: Date.now(), role: 'patient', recordId: selectedReview.id, message: `Your scan from ${selectedReview.date} has been reviewed by the doctor.`, date: new Date().toLocaleTimeString() });
+    localStorage.setItem('notifications', JSON.stringify(notifs));
+
     setSelectedReview(null);
     setDoctorNotes('');
   };
@@ -296,7 +340,9 @@ export default function Dashboard() {
       localStorage.removeItem('myRecords');
       localStorage.removeItem('pendingReviews');
       localStorage.removeItem('rlhfDataset');
+      localStorage.removeItem('notifications');
       setMyRecords([]);
+      setNotifications([]);
       window.location.reload();
     }
   };
@@ -317,10 +363,300 @@ export default function Dashboard() {
 
   const rlhfDataset = JSON.parse(localStorage.getItem('rlhfDataset') || '[]');
 
+  const handleSendChatMessage = async () => {
+    const recordToUpdate = selectedPatientRecord || selectedReview;
+    if (!client || !chatInput.trim() || !recordToUpdate) return;
+
+    const message = chatInput.trim();
+    setChatInput('');
+    setIsChatting(true);
+
+    const newRecord = { ...recordToUpdate };
+    if (!newRecord.chatHistory) newRecord.chatHistory = [];
+    newRecord.chatHistory.push({ role: 'user', text: message });
+
+    if (selectedPatientRecord) setSelectedPatientRecord(newRecord);
+    else setSelectedReview(newRecord);
+
+    try {
+      const predictPromise = client.predict("/predict", [
+        newRecord.scanImage,
+        message,
+      ]);
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 60000));
+      const result = await Promise.race([predictPromise, timeoutPromise]);
+
+      let textResponse = "No text found in response.";
+      if (Array.isArray(result.data)) {
+        const stringItem = result.data.find(i => typeof i === 'string');
+        if (stringItem) textResponse = stringItem;
+      } else if (typeof result.data === 'string') {
+        textResponse = result.data;
+      }
+
+      // Cleanup formatting
+      textResponse = textResponse.replace(/\*\*/g, '');
+
+      const finalRecord = { ...newRecord };
+      finalRecord.chatHistory.push({ role: 'ai', text: textResponse });
+
+      if (selectedPatientRecord) {
+        setSelectedPatientRecord(finalRecord);
+        const allRecords = JSON.parse(localStorage.getItem('myRecords') || '[]');
+        const recordIdx = allRecords.findIndex(r => r.id === finalRecord.id);
+        if (recordIdx !== -1) {
+          allRecords[recordIdx] = finalRecord;
+          localStorage.setItem('myRecords', JSON.stringify(allRecords));
+          setMyRecords(allRecords);
+        }
+      } else {
+        setSelectedReview(finalRecord);
+        const pending = JSON.parse(localStorage.getItem('pendingReviews') || '[]');
+        const pIdx = pending.findIndex(r => r.id === finalRecord.id);
+        if (pIdx !== -1) {
+          pending[pIdx] = finalRecord;
+          localStorage.setItem('pendingReviews', JSON.stringify(pending));
+          setPendingReviews(pending);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      const finalRecord = { ...newRecord };
+      finalRecord.chatHistory.push({ role: 'ai', text: "Error fetching response." });
+      if (selectedPatientRecord) setSelectedPatientRecord(finalRecord);
+      else setSelectedReview(finalRecord);
+    } finally {
+      setIsChatting(false);
+    }
+  };
+
+  const handlePrintPDF = () => {
+    window.print();
+  };
+
+  const renderRecordsGrid = () => (
+    selectedPatientRecord ? (
+      <div className="glass-panel" style={{ padding: '32px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <h2 style={{ margin: 0 }}>Record Detail ({selectedPatientRecord.date})</h2>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-primary" onClick={handlePrintPDF}><Download size={16} /> Download PDF</button>
+            <button className="btn btn-secondary" onClick={() => setSelectedPatientRecord(null)}>Back to Records</button>
+          </div>
+        </div>
+
+        <div className="analysis-grid print-section">
+          <div>
+            <h3 className="input-label" style={{ margin: '0 0 12px 0' }}>Patient Profile & Scan</h3>
+
+            <div style={{ padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', marginBottom: '16px', border: '1px solid var(--panel-border)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px', fontSize: '14px' }}>
+                <div><span style={{ color: 'var(--text-muted)' }}>Age:</span> {selectedPatientRecord.age || 'N/A'}</div>
+                <div><span style={{ color: 'var(--text-muted)' }}>Sex:</span> {selectedPatientRecord.sex || 'N/A'}</div>
+                <div style={{ gridColumn: 'span 2' }}><span style={{ color: 'var(--text-muted)' }}>Modality:</span> <strong>{selectedPatientRecord.scanType || 'X-Ray'}</strong></div>
+              </div>
+              {selectedPatientRecord.symptoms && (
+                <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                  <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '13px', marginBottom: '4px' }}>Presenting Symptoms:</span>
+                  <div style={{ fontSize: '13px', lineHeight: '1.5' }}>{selectedPatientRecord.symptoms}</div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: selectedPatientRecord.groundedImage ? '1fr 1fr' : '1fr', gap: '16px' }}>
+              <div className="img-preview-container border" style={{ borderColor: 'var(--panel-border)', borderStyle: 'solid', borderWidth: '1px', position: 'relative' }}>
+                <img src={selectedPatientRecord.scanImage} alt="Original Scan" className="img-preview" />
+                {selectedPatientRecord.groundedImage && <div style={{ position: 'absolute', bottom: '8px', left: '8px', background: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', color: '#fff', zIndex: 10 }}>Original</div>}
+              </div>
+              {selectedPatientRecord.groundedImage && (
+                <div className="img-preview-container border" style={{ borderColor: 'var(--panel-border)', borderStyle: 'solid', borderWidth: '1px', position: 'relative' }}>
+                  <img src={selectedPatientRecord.groundedImage} alt="AI Grounded Scan" className="img-preview" />
+                  <div style={{ position: 'absolute', bottom: '8px', left: '8px', background: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', color: 'var(--primary)', zIndex: 10 }}>AI Bounding Boxes</div>
+                </div>
+              )}
+            </div>
+            <div style={{ marginTop: '16px' }}>
+              <strong style={{ fontSize: '14px', color: 'var(--primary)' }}>Clinical Inquiry:</strong>
+              <p style={{ margin: '4px 0 0 0', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', fontSize: '14px' }}>{selectedPatientRecord.prompt}</p>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="input-label" style={{ margin: '0 0 12px 0' }}>AI Prediction</h3>
+            <div style={{ padding: '16px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '24px', fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+              {selectedPatientRecord.aiResult}
+            </div>
+
+            {selectedPatientRecord.isReviewed ? (
+              <>
+                <h3 className="input-label" style={{ margin: '0 0 12px 0' }}>Doctor's Feedback</h3>
+                <div style={{ padding: '16px', background: selectedPatientRecord.isApproved ? 'rgba(74,222,128,0.1)' : 'rgba(255,0,0,0.1)', borderRadius: '8px', border: `1px solid ${selectedPatientRecord.isApproved ? '#4ade80' : 'var(--primary)'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: selectedPatientRecord.isApproved ? '#4ade80' : 'var(--primary)', fontWeight: 'bold' }}>
+                    <CheckCircle2 size={18} />
+                    <span>{selectedPatientRecord.isApproved ? 'Approved by Doctor' : 'Corrected by Doctor'}</span>
+                  </div>
+                  {selectedPatientRecord.doctorNotes ? (
+                    <>
+                      <strong style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Doctor's Notes:</strong>
+                      <div style={{ fontSize: '14px', fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>"{selectedPatientRecord.doctorNotes}"</div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>No additional notes provided.</div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div style={{ padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                Pending review by the clinical team.
+              </div>
+            )}
+
+            {/* Chatbot Interface - Only for Patient */}
+            {role === 'patient' && (
+              <div className="glass-panel" style={{ marginTop: '24px', padding: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px' }}>
+                  <Activity size={18} color="var(--primary)" style={{ marginRight: '8px' }} />
+                  <h3 className="input-label" style={{ margin: 0 }}>MedGemma Q&A</h3>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto', marginBottom: '16px', paddingRight: '12px' }}>
+                  {(!selectedPatientRecord.chatHistory || selectedPatientRecord.chatHistory.length === 0) && (
+                    <p style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', margin: '20px 0' }}>Ask a follow up question about this scan...</p>
+                  )}
+                  {selectedPatientRecord.chatHistory && selectedPatientRecord.chatHistory.map((msg, idx) => (
+                    <div key={idx} style={{ alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', background: msg.role === 'user' ? 'var(--primary)' : 'rgba(0,0,0,0.3)', color: '#fff', padding: '10px 14px', borderRadius: '12px', borderBottomRightRadius: msg.role === 'user' ? 0 : '12px', borderBottomLeftRadius: msg.role === 'ai' ? 0 : '12px', maxWidth: '85%', fontSize: '14px', lineHeight: '1.4' }}>
+                      {msg.text}
+                    </div>
+                  ))}
+                  {isChatting && (
+                    <div style={{ alignSelf: 'flex-start', background: 'rgba(0,0,0,0.3)', padding: '10px 14px', borderRadius: '12px', borderBottomLeftRadius: 0, fontSize: '14px', fontStyle: 'italic', color: 'var(--text-muted)' }}>
+                      Generating response...
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendChatMessage()}
+                    placeholder="e.g. What does 'opacity' mean?"
+                    className="input-field"
+                    style={{ flex: 1, marginBottom: 0 }}
+                    disabled={isChatting}
+                  />
+                  <button className="btn btn-primary" onClick={handleSendChatMessage} disabled={isChatting || !chatInput.trim()}>
+                    <Send size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
+            {/* End Chatbot Interface */}
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div className="glass-panel" style={{ padding: '32px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <h2 style={{ margin: 0 }}>{role === 'doctor' ? 'All Patient Records' : 'My Medical Records'}</h2>
+          {role === 'patient' && (
+            <button
+              className="btn btn-secondary"
+              style={{ color: 'var(--danger)', borderColor: 'rgba(255,0,0,0.2)' }}
+              onClick={clearLocalDatabase}
+            >
+              Clear Database
+            </button>
+          )}
+        </div>
+        {myRecords.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)' }}>No records found.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(250px, 1fr) minmax(250px, 1fr)', gap: '20px' }}>
+            {myRecords.map((rec, i) => (
+              <div key={i} onClick={() => setSelectedPatientRecord(rec)} className="record-card" style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '16px', border: '1px solid var(--panel-border)', cursor: 'pointer', transition: 'all 0.2s' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>{rec.date} {role === 'doctor' && `• ${rec.patientName}`}</p>
+                  {role === 'patient' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteRecord(rec.id); }}
+                      style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', display: 'flex' }}
+                      title="Delete Record"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+                <img src={rec.scanImage} style={{ width: '100%', height: '150px', objectFit: 'cover', borderRadius: '8px', marginBottom: '16px' }} />
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '12px' }}>{rec.scanType || 'X-Ray'}</span>
+                  {rec.age && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{rec.age} • {rec.sex}</span>}
+                </div>
+                <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0 0 10px 0' }}>Symptoms: <span style={{ fontWeight: 'normal', color: '#ccc' }}>{rec.symptoms || 'None reported'}</span></p>
+                <div style={{ fontSize: '13px', color: '#ccc', maxHeight: '60px', overflow: 'hidden', textOverflow: 'ellipsis', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
+                  {rec.aiResult}
+                </div>
+                {rec.isReviewed && (
+                  <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', color: rec.isApproved ? '#4ade80' : 'var(--primary)' }}>
+                      <CheckCircle2 size={14} />
+                      <span style={{ fontSize: '12px', fontWeight: 'bold' }}>
+                        {rec.isApproved ? 'Approved by Doctor' : 'Corrected by Doctor'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  );
+
+  const renderNotificationsPanel = () => (
+    <div style={{ position: 'relative', cursor: 'pointer', zIndex: 100 }} onClick={() => setShowNotifications(!showNotifications)}>
+      <Bell size={20} color="var(--text-muted)" style={{ marginTop: '4px' }} />
+      {notifications.length > 0 && <div style={{ position: 'absolute', top: 0, right: -2, width: 8, height: 8, background: 'var(--danger)', borderRadius: '50%' }}></div>}
+
+      {showNotifications && (
+        <div className="profile-dropdown" style={{ width: '300px', right: -10, top: '100%', cursor: 'default' }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '12px', borderBottom: '1px solid var(--panel-border)', paddingBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Notifications</span>
+            {notifications.length > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setNotifications([]);
+                  let allNotifs = JSON.parse(localStorage.getItem('notifications') || '[]');
+                  allNotifs = allNotifs.filter(n => n.role !== role);
+                  localStorage.setItem('notifications', JSON.stringify(allNotifs));
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '12px' }}>
+                Clear All
+              </button>
+            )}
+          </div>
+          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+            {notifications.length === 0 ? <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No new notifications</div> :
+              notifications.slice().reverse().map((n, i) => (
+                <div key={i} onClick={() => handleNotificationClick(n)} style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', transition: 'background 0.2s', '&:hover': { background: 'rgba(255,255,255,0.05)' } }}>
+                  <div style={{ fontSize: '12px', color: 'var(--primary)', marginBottom: '4px' }}>{n.date}</div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.4' }}>{n.message}</div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   if (role === 'doctor') {
     return (
       <div className="dashboard">
-        <Sidebar role={role} logout={logout} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+        <Sidebar role={role} logout={logout} activeTab={activeTab} setActiveTab={setActiveTab} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
         <div className="main-content">
           <div className="header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -332,7 +668,8 @@ export default function Dashboard() {
                 <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--primary)' }}>Welcome back, {userName}. {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
               </div>
             </div>
-            <div className="profile-wrapper">
+            <div className="profile-wrapper" style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+              {renderNotificationsPanel()}
               <div className="user-profile" onClick={() => setProfileOpen(!profileOpen)}>
                 <div className="avatar">{userName.charAt(0).toUpperCase()}</div>
                 <span>{userName}</span>
@@ -355,7 +692,9 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {!selectedReview ? (
+          {activeTab === 'records' ? (
+            renderRecordsGrid()
+          ) : !selectedReview ? (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '32px' }}>
                 <div className="glass-panel" style={{ padding: '24px' }}>
@@ -477,8 +816,17 @@ export default function Dashboard() {
                     )}
                   </div>
 
-                  <div className="img-preview-container border" style={{ borderColor: 'var(--panel-border)', borderStyle: 'solid', borderWidth: '1px' }}>
-                    <img src={selectedReview.scanImage} alt="Patient Scan" className="img-preview" />
+                  <div style={{ display: 'grid', gridTemplateColumns: selectedReview.groundedImage ? '1fr 1fr' : '1fr', gap: '16px' }}>
+                    <div className="img-preview-container border" style={{ borderColor: 'var(--panel-border)', borderStyle: 'solid', borderWidth: '1px', position: 'relative' }}>
+                      <img src={selectedReview.scanImage} alt="Original Scan" className="img-preview" />
+                      {selectedReview.groundedImage && <div style={{ position: 'absolute', bottom: '8px', left: '8px', background: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', color: '#fff', zIndex: 10 }}>Original</div>}
+                    </div>
+                    {selectedReview.groundedImage && (
+                      <div className="img-preview-container border" style={{ borderColor: 'var(--panel-border)', borderStyle: 'solid', borderWidth: '1px', position: 'relative' }}>
+                        <img src={selectedReview.groundedImage} alt="AI Grounded Scan" className="img-preview" />
+                        <div style={{ position: 'absolute', bottom: '8px', left: '8px', background: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', color: 'var(--primary)', zIndex: 10 }}>AI Bounding Boxes</div>
+                      </div>
+                    )}
                   </div>
                   <div style={{ marginTop: '16px' }}>
                     <strong style={{ fontSize: '14px', color: 'var(--primary)' }}>Clinical Inquiry:</strong>
@@ -506,6 +854,8 @@ export default function Dashboard() {
                     <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => submitFeedback(true)}>Approve (Accurate)</button>
                     <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => submitFeedback(false)}>Submit Correction</button>
                   </div>
+
+
                 </div>
               </div>
             </div>
@@ -532,7 +882,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="profile-wrapper">
+          <div className="profile-wrapper" style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+            {renderNotificationsPanel()}
             <div className="user-profile" onClick={() => setProfileOpen(!profileOpen)}>
               <div className="avatar">{userName.charAt(0).toUpperCase()}</div>
               <span>{userName}</span>
@@ -556,62 +907,7 @@ export default function Dashboard() {
         </div>
 
         {activeTab === 'records' ? (
-          <div className="glass-panel" style={{ padding: '32px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 style={{ margin: 0 }}>My Medical Records</h2>
-              <button
-                className="btn btn-secondary"
-                style={{ color: 'var(--danger)', borderColor: 'rgba(255,0,0,0.2)' }}
-                onClick={clearLocalDatabase}
-              >
-                Clear Database
-              </button>
-            </div>
-            {myRecords.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)' }}>No records found. Upload a scan to generate a record.</p>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(250px, 1fr) minmax(250px, 1fr)', gap: '20px' }}>
-                {myRecords.map((rec, i) => (
-                  <div key={i} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '16px', border: '1px solid var(--panel-border)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>{rec.date}</p>
-                      <button
-                        onClick={() => deleteRecord(rec.id)}
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', display: 'flex' }}
-                        title="Delete Record"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                    <img src={rec.scanImage} style={{ width: '100%', height: '150px', objectFit: 'cover', borderRadius: '8px', marginBottom: '16px' }} />
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '12px' }}>{rec.scanType || 'X-Ray'}</span>
-                      {rec.age && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{rec.age} • {rec.sex}</span>}
-                    </div>
-                    <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0 0 10px 0' }}>Symptoms: <span style={{ fontWeight: 'normal', color: '#ccc' }}>{rec.symptoms || 'None reported'}</span></p>
-                    <div style={{ fontSize: '13px', color: '#ccc', maxHeight: '60px', overflow: 'hidden', textOverflow: 'ellipsis', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
-                      {rec.aiResult}
-                    </div>
-                    {rec.isReviewed && (
-                      <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', color: rec.isApproved ? '#4ade80' : 'var(--primary)' }}>
-                          <CheckCircle2 size={14} />
-                          <span style={{ fontSize: '12px', fontWeight: 'bold' }}>
-                            {rec.isApproved ? 'Approved by Doctor' : 'Corrected by Doctor'}
-                          </span>
-                        </div>
-                        {rec.doctorNotes && (
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px' }}>
-                            "{rec.doctorNotes}"
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          renderRecordsGrid()
         ) : (
           <>
             {/* System Status / Telemetry */}
@@ -800,6 +1096,7 @@ export default function Dashboard() {
       <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
         .animate-spin { animation: spin 1s linear infinite; }
+        .record-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); border-color: rgba(255,255,255,0.1) !important; }
       `}</style>
     </div>
   );

@@ -512,8 +512,75 @@ body {
 }
 
 .no-scrollbar {
-  -ms-overflow-style: none;
-  /* IE and Edge */
-  scrollbar-width: none;
-  /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+/* Print Styles for PDF Export */
+@media print {
+  .sidebar, .header, .btn, .uploader, .auth-container, .profile-wrapper {
+    display: none !important;
+  }
+  
+  .main-content {
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  
+  .dashboard, .glass-panel, .print-section {
+    background: white !important;
+    color: black !important;
+    border: none !important;
+    box-shadow: none !important;
+    display: block !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  h2, h3, h4, span, p, div {
+    color: black !important;
+  }
+
+  .text-muted {
+    color: #555 !important;
+  }
+
+  .primary {
+    color: #000 !important;
+  }
+  
+  /* Prevent page breaks inside cards/images */
+  .img-preview-container, .print-section > div {
+    page-break-inside: avoid;
+  }
+
+  .img-preview-container {
+    border: 1px solid #ccc !important;
+    background: #fff !important;
+  }
+}
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .4;
+  }
+}
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.skeleton-box {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+.skeleton-text {
+  height: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  margin-bottom: 12px;
 }
